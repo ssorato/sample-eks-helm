@@ -1,0 +1,15 @@
+formatter: "" # this is required
+
+version: ""
+
+header-from: ".header.md"
+footer-from: ""
+
+recursive:
+  enabled: false
+  path: .
+  include-main: true
+
+output:
+  file: "./README.md"
+  mode: replace
