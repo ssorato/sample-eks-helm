@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+  namespace: myapp
+  annotations:
+    alb.ingress.kubernetes.io/load-balancer-name: "myapp-albc"
+    alb.ingress.kubernetes.io/scheme: "internet-facing"
+    alb.ingress.kubernetes.io/target-type: "ip"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]' 
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/certificate-arn: "{{ required "A valid certificate arn is required!" .Values.ingress.certificate_arn }}"
+    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+    alb.ingress.kubernetes.io/healthcheck-path: "/health"
+    alb.ingress.kubernetes.io/healthcheck-port: "traffic-port" 
+    alb.ingress.kubernetes.io/healthcheck-protocol: "HTTP" 
+    alb.ingress.kubernetes.io/inbound-cidrs: "{{ .Values.ingress.inbound_cidrs }}" # limit access
+  labels:
+    app.kubernetes.io/name: myapp
+spec:
+  ingressClassName: alb
+  rules:
+    - host: {{ required "A valid host name is required!" .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-svc
+                port:
+                  number: 8080
