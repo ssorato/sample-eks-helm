@@ -1,26 +1,21 @@
 common_tags = {
-  created_by = "terraform-sample-eks-flask"
-  sandbox    = "eks-flask"
+  created_by = "terraform-sample-eks-helm"
+  sandbox    = "eks-helm"
 }
 
-project_name = "eks-flask"
+project_name = "eks-helm"
 region       = "us-east-1"
 
 ssm_vpc = "/eks-network/vpc/id"
-ssm_public_subnets = [
-  "/eks-network/subnets/private/us-east-1a/eks-flask-private-1a",
-  "/eks-network/subnets/private/us-east-1b/eks-flask-private-1b",
-  "/eks-network/subnets/private/us-east-1c/eks-flask-private-1c"
-]
 ssm_private_subnets = [
-  "/eks-network/subnets/private/us-east-1a/eks-flask-private-1a",
-  "/eks-network/subnets/private/us-east-1b/eks-flask-private-1b",
-  "/eks-network/subnets/private/us-east-1c/eks-flask-private-1c"
+  "/eks-network/subnets/private/us-east-1a/eks-helm-private-1a",
+  "/eks-network/subnets/private/us-east-1b/eks-helm-private-1b",
+  "/eks-network/subnets/private/us-east-1c/eks-helm-private-1c"
 ]
 ssm_pod_subnets = [
-  "/eks-network/subnets/private/us-east-1a/eks-flask-pods-1a",
-  "/eks-network/subnets/private/us-east-1b/eks-flask-pods-1b",
-  "/eks-network/subnets/private/us-east-1c/eks-flask-pods-1c"
+  "/eks-network/subnets/private/us-east-1a/eks-helm-pods-1a",
+  "/eks-network/subnets/private/us-east-1b/eks-helm-pods-1b",
+  "/eks-network/subnets/private/us-east-1c/eks-helm-pods-1c"
 ]
 ssm_natgw_eips = [
   "/eks-network/subnets/public/us-east-1a/natgw-eip"

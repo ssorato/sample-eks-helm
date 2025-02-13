@@ -1,5 +1,5 @@
 data "http" "myip" {
-  url = "http://ifconfig.me"
+  url = "http://ipv4.icanhazip.com"
 }
 
 module "esk" {
