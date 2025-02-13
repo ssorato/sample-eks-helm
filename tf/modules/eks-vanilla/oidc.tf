@@ -8,7 +8,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
     data.tls_certificate.eks.certificates[0].sha1_fingerprint,
     var.eks_oidc_thumbprint
   ]
-  url = flatten(concat(aws_eks_cluster.main[*].identity[*].oidc.0.issuer, [""]))[0]
+  url = flatten(concat(aws_eks_cluster.main[*].identity[*].oidc[0].issuer, [""]))[0]
 
   tags = merge(
     {
