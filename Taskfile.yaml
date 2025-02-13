@@ -1,0 +1,292 @@
+version: '3'
+
+dotenv: ['.env']
+
+env:
+  AWS_ACCOUNT_ID:
+    sh: aws sts get-caller-identity --query Account --output text
+  AWS_REGION:
+    sh: grep region tf/sample/eks/environment/dev/terraform.tfvars | cut -d"\"" -f 2 # Get region from terraform vars
+  K8S_NAME:
+    sh: grep project_name tf/sample/eks/environment/dev/terraform.tfvars | cut -d"=" -f 2 | sed 's/[" ]//g'
+
+tasks:
+  backend_tf:
+    internal: true
+    dir: "tf/sample/{{.SAMPLE_FOLDER}}"
+    cmds:
+      - |-
+        cat <<EOT > environment/dev/backend.tfvars
+        bucket         = "{{.S3_BUCKET_NAME}}"
+        key            = "sample-{{.SAMPLE_FOLDER}}.tfstate"
+        use_lockfile   = true
+        region         = "{{.S3_AWS_REGION}}"
+        EOT
+
+  plan_tf:
+    internal: true
+    dir: "tf/sample/{{.SAMPLE_FOLDER}}"
+    cmds:
+      - task: backend_tf
+        vars:
+          SAMPLE_FOLDER: "{{.SAMPLE_FOLDER}}"
+      - echo "Plan about sample {{.SAMPLE_FOLDER}} ..."
+      - terraform init -backend-config=environment/dev/backend.tfvars --upgrade
+      - terraform validate
+      - |-
+        {{if eq .SAMPLE_FOLDER "eks"}}
+        export TF_VAR_route53="{ dns_name = \"{{.APP_DNS_NAME}}\", hosted_zone = \"{{.AWS_HOSTED_ZONE_ID}}\" }"
+        {{end}}
+        terraform plan -var-file=environment/dev/terraform.tfvars 
+
+  create_tf:
+    internal: true
+    interactive: true
+    dir: "tf/sample/{{.SAMPLE_FOLDER}}"
+    cmds:
+      - task: plan_tf
+        vars:
+          SAMPLE_FOLDER: "{{.SAMPLE_FOLDER}}"
+      - echo "Check the plan about sample {{.SAMPLE_FOLDER}} ... Do you want to continue?"; read a
+      - |-
+        {{if eq .SAMPLE_FOLDER "eks"}}
+        export TF_VAR_route53="{ dns_name = \"{{.APP_DNS_NAME}}\", hosted_zone = \"{{.AWS_HOSTED_ZONE_ID}}\" }"
+        {{end}}
+        terraform apply -var-file=environment/dev/terraform.tfvars -auto-approve
+
+  destroy_tf:
+    internal: true
+    dir: "tf/sample/{{.SAMPLE_FOLDER}}"
+    cmds:
+      - task: backend_tf
+        vars:
+          SAMPLE_FOLDER: "{{.SAMPLE_FOLDER}}"
+      - echo "Destroy about sample {{.SAMPLE_FOLDER}} ..."
+      - |-
+        {{if eq .SAMPLE_FOLDER "eks"}}
+        export TF_VAR_route53="{ dns_name = \"{{.APP_DNS_NAME}}\", hosted_zone = \"{{.AWS_HOSTED_ZONE_ID}}\" }"
+        {{end}}
+        terraform init -backend-config=environment/dev/backend.tfvars
+        terraform destroy -var-file=environment/dev/terraform.tfvars -auto-approve
+      - rm -rf .terraform.lock.hcl
+      - rm -rf .terraform
+
+  create-network:
+    desc: Create AWS network infrastructure
+    cmds:
+      - task: create_tf
+        vars:
+          SAMPLE_FOLDER: "network"
+
+  destroy-network:
+    desc: Destroy AWS network infrastructure
+    # deps:
+    #   - destroy-eks
+    cmds:
+      - task: destroy_tf
+        vars:
+          SAMPLE_FOLDER: "network"
+
+  create-eks:
+    desc: Create AWS EKS
+    # deps:
+    #   - create-network
+    cmds:
+      - task: create_tf
+        vars:
+          SAMPLE_FOLDER: "eks"
+
+  destroy-eks:
+    desc: Destroy AWS EKS
+    # deps:
+    #   -  destroy-ecr-imgs
+    cmds:
+      - task: destroy_tf
+        vars:
+          SAMPLE_FOLDER: "eks"
+
+  ci-docker:
+    desc: CI - build and push docker image
+    dir: application/docker
+    cmds:
+      - |-
+        export IMG_TAG=`grep version Dockerfile | cut -d"=" -f 2 | sed 's/"//g'`
+        aws ecr get-login-password --region {{.AWS_REGION}} | docker login --username AWS --password-stdin {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com
+        docker build --platform linux/amd64 -t {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-amd64 .
+        docker build --platform linux/arm64 -t {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-arm64 .
+        trivy image {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-amd64
+        trivy image {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-arm64
+        docker push {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-amd64
+        docker push {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-arm64
+        docker manifest create --amend {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG \
+        {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-amd64 \
+        {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG-arm64
+        docker manifest inspect {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG
+        docker manifest push -p {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello:$IMG_TAG
+
+  ci-helm:
+    desc: CI - build and push helm package
+    # deps:
+    #   - ci-docker
+    dir: application/helm
+    cmds:
+      - helm template --set ingress.certificate_arn=fake-arn --set ingress.host=fake-host myapp --set image.repository=fake-repo
+      - aws ecr get-login-password --region {{.AWS_REGION}} | docker login --username AWS --password-stdin {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com
+      - helm package myapp
+      - helm push `ls myapp*.tgz` oci://{{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/
+      - rm -f myapp*.tgz
+
+  cd-helm:
+    desc: CD - deploy helm application
+    # deps:
+    #   - ci-helm
+    #   - create-eks
+    cmds:
+      - |-
+        aws eks update-kubeconfig --region {{.AWS_REGION}} --name {{.K8S_NAME}} --kubeconfig ~/.kube/{{.K8S_NAME}} --alias {{.K8S_NAME}}
+        export KUBECONFIG=~/.kube/{{.K8S_NAME}}
+        export SSM_PREFIX=`grep project_name tf/sample/eks/environment/dev/terraform.tfvars | cut -d"=" -f 2 | sed 's/[" ]//g'`
+        export SSM_CERTIFICATE_NAME=`echo '{{.APP_DNS_NAME}}' | sed 's/*.//'`
+        export MY_PUBLIC_IP=`curl -s http://ipv4.icanhazip.com` # Limit access to the application
+        export DOCKER_TAG=`grep version application/docker/Dockerfile | cut -d"=" -f 2 | sed 's/"//g'`
+        export HELM_TAG=`grep version application/helm/myapp/Chart.yaml | cut -d" " -f 2 | sed 's/"//g'`
+        export CERTIFICATE_ARN=`aws ssm get-parameters --names "/$SSM_PREFIX/certificate/$SSM_CERTIFICATE_NAME/id" --query "Parameters[*].Value" --output text`
+        helm upgrade myapp --cleanup-on-fail \
+        --install oci://{{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/myapp \
+        --version $HELM_TAG \
+        --namespace myapp \
+        --create-namespace \
+        --set helloName=Guest \
+        --set ingress.host={{.APP_DNS_NAME}} \
+        --set ingress.certificate_arn=$CERTIFICATE_ARN \
+        --set ingress.inboundCidrs=$MY_PUBLIC_IP/32 \
+        --set image.repository={{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/hello \
+        --set image.tag=$DOCKER_TAG
+  
+  dns-record:
+    desc: Add dns record
+    # deps:
+    #   - cd-helm
+    cmds:
+      - |-
+        # Wait for load balancer
+        export KUBECONFIG=~/.kube/{{.K8S_NAME}}
+        kubectl -n myapp wait --for=jsonpath='{.status.loadBalancer.ingress}' ingress/myapp-ingress --timeout=60s
+      - |-
+        export MY_ALB_DNS_NAME=`aws elbv2 describe-load-balancers --names myapp-albc --query 'LoadBalancers[*].[DNSName]' --output text`
+        export LB_HOSTED_ZONE_ID=`aws elbv2 describe-load-balancers --names myapp-albc --query 'LoadBalancers[*].[CanonicalHostedZoneId]' --output text`
+        cat << EOT > dns_record.json
+        {  
+          "Comment": "Creating Alias resource record sets in Route 53",
+            "Changes": [
+            {
+            "Action": "UPSERT",
+            "ResourceRecordSet": {
+                "Name": "${APP_DNS_NAME}",
+                "Type": "A",
+                "AliasTarget": {
+                    "HostedZoneId": "${LB_HOSTED_ZONE_ID}",
+                    "DNSName": "dualstack.${MY_ALB_DNS_NAME}.",
+                    "EvaluateTargetHealth": false
+                }
+              }
+            }
+          ]
+        }
+        EOT
+        aws route53 change-resource-record-sets --hosted-zone-id {{.AWS_HOSTED_ZONE_ID}} --change-batch file://./dns_record.json
+
+  test-app:
+    desc: Test application 
+    # deps:
+    #   - dns-record
+    cmds:
+      - sleep 10 # Review ... wait for my dns to be updated
+      - curl -si https://{{.APP_DNS_NAME}} && echo
+
+  destroy-dns-record:
+    desc: Delete dns record
+    cmds:
+      - |-
+        export RS=`aws route53 list-resource-record-sets --hosted-zone-id {{.AWS_HOSTED_ZONE_ID}} --query "ResourceRecordSets[?Name == '{{.APP_DNS_NAME}}.']" --output text`
+        if [ -n "$RS" ]
+        then
+          export MY_ALB_DNS_NAME=`aws elbv2 describe-load-balancers --names myapp-albc --query 'LoadBalancers[*].[DNSName]' --output text`
+          export LB_HOSTED_ZONE_ID=`aws elbv2 describe-load-balancers --names myapp-albc --query 'LoadBalancers[*].[CanonicalHostedZoneId]' --output text`
+          cat << EOT > dns_record.json
+          {  
+            "Comment": "Creating Alias resource record sets in Route 53",
+              "Changes": [
+              {
+              "Action": "DELETE",
+              "ResourceRecordSet": {
+                  "Name": "${APP_DNS_NAME}",
+                  "Type": "A",
+                  "AliasTarget": {
+                      "HostedZoneId": "${LB_HOSTED_ZONE_ID}",
+                      "DNSName": "dualstack.${MY_ALB_DNS_NAME}.",
+                      "EvaluateTargetHealth": false
+                  }
+                }
+              }
+            ]
+          }
+        EOT
+          aws route53 change-resource-record-sets --hosted-zone-id {{.AWS_HOSTED_ZONE_ID}} --change-batch file://./dns_record.json
+        fi
+
+  destroy-helm:
+    desc: Delete helm application
+    cmds:
+      - |-
+        aws eks update-kubeconfig --region {{.AWS_REGION}} --name {{.K8S_NAME}} --kubeconfig ~/.kube/{{.K8S_NAME}} --alias {{.K8S_NAME}}
+        export KUBECONFIG=~/.kube/{{.K8S_NAME}}
+        helm uninstall -n myapp  myapp
+        # Wait for load balancer to be deleted
+        kubectl -n myapp wait --for=delete ingress/myapp-ingress --timeout=60s
+
+  destroy-ecr-imgs:
+    desc: Delete ECR images
+    #internal: true
+    dir: tf/sample/eks
+    cmds:
+        - |-
+          terraform output -json ecr_repos | jq -r '.[]' |
+          while read REPO
+          do
+            export IMG_DIGEST=`aws ecr list-images --repository-name $REPO --query 'imageIds[*].imageDigest' --output text | sed 's/sha256/imageDigest=sha256/g'`
+            aws ecr batch-delete-image --repository-name $REPO --image-ids $IMG_DIGEST --no-cli-pager
+          done
+
+  create-infra:
+    desc: Create AWS infrastructure
+    cmds:
+      - task: create-network
+      - task: create-eks
+
+  destroy-infra:
+    desc: Destroy AWS infrastructure
+    prompt: Do you want to continue?
+    interactive: true
+    cmds:
+      - task: destroy-eks
+      - task: destroy-network
+
+  create-app:
+    desc: create application
+    cmds:
+      - task: ci-docker
+      - task: ci-helm
+      - task: cd-helm
+      - task: dns-record
+      #- task: test-app
+
+  destroy-app:
+    desc: Destroy application
+    prompt: Do you want to continue?
+    interactive: true
+    cmds:
+      - task: destroy-ecr-imgs
+      - task: destroy-dns-record
+      - task: destroy-helm
+
