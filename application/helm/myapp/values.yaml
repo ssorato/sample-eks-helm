@@ -1,6 +1,6 @@
 replicaCount: 1
 
-hello_name: Guest
+helloName: Guest
 
 image:
   # repository:
@@ -14,6 +14,6 @@ resources:
     memory: 128Mi
 
 ingress:
-  inbound_cidrs: 0.0.0.0/0
+  inboundCidrs: 0.0.0.0/0
   # host:
-  # certificate_arn:
+  # certificateArn:

@@ -6,7 +6,7 @@ metadata:
   labels:
     app: myapp
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app: myapp
@@ -21,7 +21,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: NAME
-              value: {{ .Values.hello_name }}
+              value: {{ .Values.helloName }}
           ports:
             - name: http
               containerPort: 8080

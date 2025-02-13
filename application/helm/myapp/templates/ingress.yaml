@@ -14,7 +14,7 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-path: "/health"
     alb.ingress.kubernetes.io/healthcheck-port: "traffic-port" 
     alb.ingress.kubernetes.io/healthcheck-protocol: "HTTP" 
-    alb.ingress.kubernetes.io/inbound-cidrs: "{{ .Values.ingress.inbound_cidrs }}" # limit access
+    alb.ingress.kubernetes.io/inbound-cidrs: "{{ .Values.ingress.inboundCidrs }}" # limit access
   labels:
     app.kubernetes.io/name: myapp
 spec:
