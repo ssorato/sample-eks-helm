@@ -9,6 +9,7 @@
 * [Trivy](https://trivy.dev) security scanner
 * [jq](https://jqlang.org/) command-line JSON processor
 * A valid public domain declared in the AWS Route53 dns
+* [Task runner](https://taskfile.dev/) used by local pipeline (optional)
 
 ## Terraform
 
@@ -62,8 +63,8 @@ Review the `environment/dev/terraform.tfvars`
 Create the EKS:
 
 ```bash
-export APP_DNS_NAME=<your dns app name>
-export MY_DOMAIN_HOSTED_ZONE_ID=<your app domain hosted zone id>
+export APP_DNS_NAME=<your dns app name> # sample.mydomain.com - a certificate will be created
+export MY_DOMAIN_HOSTED_ZONE_ID=<your app domain hosted zone id> # mydomain.com
 export TF_VAR_route53="{ dns_name = \"$APP_DNS_NAME\", hosted_zone = \"$MY_DOMAIN_HOSTED_ZONE_ID\" }"
 terraform init -backend-config=environment/dev/backend.tfvars
 terraform validate
@@ -155,7 +156,7 @@ Deploy:
 ```bash
 export KUBECONFIG=~/.kube/eks-helm
 export SSM_PREFIX=`grep project_name tf/sample/eks/environment/dev/terraform.tfvars | cut -d"=" -f 2 | sed 's/[" ]//g'`
-export MY_PUBLIC_IP=`curl -s ifconfig.me` # Limit access to the application
+export MY_PUBLIC_IP=`curl -s http://ipv4.icanhazip.com` # Limit access to the application
 export DOCKER_TAG=`grep version application/docker/Dockerfile | cut -d"=" -f 2 | sed 's/"//g'`
 export HELM_TAG=`grep version application/helm/myapp/Chart.yaml | cut -d" " -f 2 | sed 's/"//g'`
 export CERTIFICATE_ARN=`aws ssm get-parameters --names "/$SSM_PREFIX/certificate/$APP_DNS_NAME/id" --query "Parameters[*].Value" --output text`
@@ -174,9 +175,15 @@ helm upgrade myapp --cleanup-on-fail \
 
 ### Add DNS record
 
+Wait for load balancer:
+
+```bash
+kubectl -n myapp wait --for=jsonpath='{.status.loadBalancer.ingress}' ingress/myapp-ingress --timeout=60s
+```
+
 ```bash
 export MY_ALB_DNS_NAME=`aws elbv2 describe-load-balancers --names myapp-albc --query 'LoadBalancers[*].[DNSName]' --output text`
-export LB_HOSTED_ZONE_ID=Z35SXDOTRQ7X7K # us-east-1 mock - todo: get id from aws cli
+export LB_HOSTED_ZONE_ID=`aws elbv2 describe-load-balancers --names myapp-albc --query 'LoadBalancers[*].[CanonicalHostedZoneId]' --output text`
 cat << EOT > dns_record.json
 {  
   "Comment": "Creating Alias resource record sets in Route 53",
@@ -206,7 +213,7 @@ export READY=false
 export COUNT=0
 while [ "$READY" = "false" ] && [ "$COUNT" -lt 10 ]
 do
-  nslookup $APP_DNS_NAME > /dev/null 2>&1
+  nslookup $APP_DNS_NAME | grep "Name:" > /dev/null 2>&1
   if [ $? -eq 0 ]
   then
     export READY=true
@@ -240,47 +247,27 @@ Delete the application (required in order to delete the load balancer):
 helm uninstall -n myapp myapp
 ```
 
-Wait for load balancer to be deleted:
+Wait for load balancer to be deleted ( _required in order to delete the certificate using terraform_ ):
 
 ```bash
-export READY=false
-export COUNT=0
-while [ "$READY" = "false" ] && [ "$COUNT" -lt 10 ]
-do
-  kubectl -n myapp get ingress myapp-ingress > /dev/null 2>&1
-  if [ $? -eq 1 ]
-  then
-    export READY=true
-  else
-    COUNT=$((COUNT+1))
-    echo -n "."
-    sleep 5
-  fi
-done
-echo
-if [ "$READY" = "false" ]
-then
-  echo "Unable to delete load balancer myapp-ingress"
-  exit 1
-fi
+kubectl -n myapp wait --for=delete ingress/myapp-ingress --timeout=60s
 ```
 
 Delete the images in the ECR:
 
 ```bash
-export IMG_DIGEST=`aws ecr list-images --repository-name hello --query 'imageIds[*].imageDigest' --output text | sed 's/sha256/imageDigest=sha256/g'`
-aws ecr batch-delete-image --repository-name hello --image-ids $IMG_DIGEST
-
-export IMG_DIGEST=`aws ecr list-images --repository-name myapp --query 'imageIds[*].imageDigest' --output text | sed 's/sha256/imageDigest=sha256/g'`
-aws ecr batch-delete-image --repository-name myapp --image-ids $IMG_DIGEST
+cd tf/sample/eks
+terraform output -json ecr_repos | jq -r '.[]' |
+while read REPO
+do
+  export IMG_DIGEST=`aws ecr list-images --repository-name $REPO --query 'imageIds[*].imageDigest' --output text | sed 's/sha256/imageDigest=sha256/g'`
+  aws ecr batch-delete-image --repository-name $REPO --image-ids $IMG_DIGEST --no-cli-pager
+done
 ```
 
 Delete the EKS:
 
-# terraform output ecr_repos
-
 ```bash
-cd tf/sample/eks
 export TF_VAR_route53="{ dns_name = \"$APP_DNS_NAME\", hosted_zone = \"$MY_DOMAIN_HOSTED_ZONE_ID\" }"
 terraform destroy -var-file=environment/dev/terraform.tfvars -auto-approve
 rm -rf .terraform.lock.hcl
@@ -298,6 +285,35 @@ cd ../../../
 ```
 
 Remove the terraform state files in the s3 bucket.
+
+## Local pipeline
+
+Using [Task runner](https://taskfile.dev/) and [pipeline defintion file](Taskfile.yaml)
+
+Create an enviroment file:
+
+```bash
+cat << EOT > .env
+S3_BUCKET_NAME=<bucket name>
+S3_AWS_REGION=<bucket region>
+APP_DNS_NAME=<app dns name> # sample.mydomain.com
+AWS_HOSTED_ZONE_ID=<your app domain hosted zone id>
+EOT
+```
+
+Deploy:
+
+```bash
+task create-infra
+task create-app
+```
+
+Cleanup:
+
+```bash
+task destroy-app
+task destroy-infra
+```
 
 ## References
 
