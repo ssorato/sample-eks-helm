@@ -6,11 +6,19 @@ variable "common_tags" {
 variable "project_name" {
   type        = string
   description = "The resource name sufix"
+  validation {
+    condition = length(var.project_name) > 0
+    error_message = "Project name cannot be an empty string."
+  }
 }
 
 variable "region" {
   type        = string
   description = "The AWS region"
+  validation {
+    condition = length(var.region) > 0
+    error_message = "Region name cannot be an empty string."
+  }
 }
 
 variable "ssm_vpc" {
@@ -42,6 +50,12 @@ variable "api_public_access_cidrs" {
   type        = list(string)
   description = "List of CIDR blocks that can access the Amazon EKS public API server endpoint when enabled"
   default     = ["0.0.0.0/0"]
+  validation {
+    condition = alltrue([
+      for cidr in var.api_public_access_cidrs : can(cidrhost(cidr, 0))
+    ])
+    error_message = "CIDR must be a valid address."
+  }
 }
 
 variable "eks_oidc_thumbprint" {
