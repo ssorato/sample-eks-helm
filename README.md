@@ -206,7 +206,7 @@ export READY=false
 export COUNT=0
 while [ "$READY" = "false" ] && [ "$COUNT" -lt 10 ]
 do
-  nslookup $APP_DNS_NAME > /dev/null 2>&1
+  nslookup $APP_DNS_NAME | grep "No answer" > /dev/null 2>&1
   if [ $? -eq 0 ]
   then
     export READY=true
