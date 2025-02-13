@@ -76,3 +76,8 @@ variable "addon_kubeproxy_version" {
   type        = string
   description = "Kube-Proxy addon version"
 }
+
+variable "ecr_repos_name" {
+  type        = list(string)
+  description = "The ECR repositories name"
+}

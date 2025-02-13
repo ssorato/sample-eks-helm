@@ -41,3 +41,8 @@ auto_scale_options = {
 nodes_instance_sizes = [
   "t3a.micro" # Max 4 PODs per node
 ]
+
+ecr_repos_name = [
+  "hello", # docker image
+  "myapp" # helm chart
+]
