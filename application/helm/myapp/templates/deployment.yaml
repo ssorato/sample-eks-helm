@@ -19,6 +19,9 @@ spec:
         - name: web
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
           env:
             - name: NAME
               value: {{ .Values.helloName }}
