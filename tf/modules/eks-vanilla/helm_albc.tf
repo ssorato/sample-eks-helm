@@ -17,7 +17,7 @@ resource "helm_release" "alb_ingress_controller" {
 
   set {
     name  = "serviceAccount.name"
-    value = "aws-load-balancer-controller"
+    value = "aws-load-balancer-controller" # see aws_iam_policy_document.aws_lb_role
   }
 
   set {

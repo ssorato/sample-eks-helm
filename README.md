@@ -1,5 +1,7 @@
 # Sample helm application running on EKS
 
+This is an example helm application running on EKS and accessible from a public internet domain.
+
 ## Requirements
 
 * [AWS cli](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html)
@@ -9,7 +11,7 @@
 * [Trivy](https://trivy.dev) security scanner
 * [jq](https://jqlang.org/) command-line JSON processor
 * A valid public domain declared in the AWS Route53 dns
-* [Task runner](https://taskfile.dev/) used by local pipeline (optional)
+* [Task runner](https://taskfile.dev/) used by [local pipeline](#local-pipeline) (optional)
 
 ## Terraform
 
@@ -153,6 +155,9 @@ aws eks update-kubeconfig --region $AWS_REGION --name $K8S_NAME --kubeconfig ~/.
 
 Deploy:
 
+> [!WARNING]  
+> `MY_PUBLIC_IP` limit access to the application from internet.
+
 ```bash
 export KUBECONFIG=~/.kube/eks-helm
 export SSM_PREFIX=`grep project_name tf/sample/eks/environment/dev/terraform.tfvars | cut -d"=" -f 2 | sed 's/[" ]//g'`
@@ -294,14 +299,17 @@ Create an enviroment file:
 
 ```bash
 cat << EOT > .env
-S3_BUCKET_NAME=<bucket name>
-S3_AWS_REGION=<bucket region>
+S3_BUCKET_NAME=<tf state bucket name>
+S3_AWS_REGION=<tf state bucket region>
 APP_DNS_NAME=<app dns name> # sample.mydomain.com
 AWS_HOSTED_ZONE_ID=<your app domain hosted zone id>
 EOT
 ```
 
 Deploy:
+
+> [!WARNING]  
+> `MY_PUBLIC_IP` variable limits access to the application from internet ( see the task `cd-helm` inside [pipeline defintion file](Taskfile.yaml))
 
 ```bash
 task create-infra
@@ -317,11 +325,13 @@ task destroy-infra
 
 ## References
 
-[Getting Started with the Python Chainguard Image](https://edu.chainguard.dev/chainguard/chainguard-images/getting-started/python/)
+[Chainguard Image for python](https://images.chainguard.dev/directory/image/python/overview)
 
 [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/)
 
 [Security policies for your Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html)
+
+[AWS Load Balancer Controller - configure IAM](https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.7/deploy/installation/#configure-iam)
 
 [Amazon EKS recommended maximum Pods for each Amazon EC2 instance type](https://docs.aws.amazon.com/eks/latest/userguide/choosing-instance-type.html#determine-max-pods)
 
